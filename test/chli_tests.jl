@@ -221,8 +221,8 @@ end
     rt(name, value) = (do_write(refame(name, value), db); unfame(do_read!(quick_info(db, uppercase(string(name))), db)))
     @test rt(:sa, "été à") == "été à"
     @test rt(:sb, ["a", "à", "bébé", ""]) == ["a", "à", "bébé", ""]
-    @test isnan(rt(:na, NaN))
-    @test isnan(rt(:nb, NaN32))
+    @test isnan(rt(:xnan, NaN))
+    @test isnan(rt(:xnanf, NaN32))
     @test isempty(rt(:ea, TSeries(2020Q1)))
     r = rt(:eb, TSeries(2020Q1, [NaN]))
     @test length(r) == 1 && isnan(r[2020Q1])
@@ -233,7 +233,12 @@ end
     fo.data[2] = FAME.FBOONC
     do_write(fo, db)
     @test_logs (:warn, r"bo: 1 missing boolean"i) readfame(db, "bo")
-    @test_throws FAME.HLIError fame("this is not a fame command"; quiet=true)
+    err = try
+        fame("this is not a fame command"; quiet=true)
+    catch e
+        e
+    end
+    @test err isa FAME.HLIError && occursin("syntax", err.msg)
     b = IOBuffer()
     fame(b, "type 1+1")
     @test occursin("2", String(take!(b)))

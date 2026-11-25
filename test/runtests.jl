@@ -4,13 +4,16 @@
 using Test
 using FAME
 
-include("aqua.jl")
+# one test set around everything, so a failure does not skip what follows
+@testset "FAME.jl" begin
+    include("aqua.jl")
 
-if FAME.chli.lib === nothing
-    @warn "The CHLI library was not found: the tests that need FAME (chli_tests.jl) are skipped."
-else
-    include("chli_tests.jl")
+    if FAME.chli.lib === nothing
+        @warn "The CHLI library was not found: the tests that need FAME (chli_tests.jl) are skipped."
+    else
+        include("chli_tests.jl")
+    end
+
+    # these replace the library with a stand-in, so they come last
+    include("mock_tests.jl")
 end
-
-# these replace the library with a stand-in, so they come last
-include("mock_tests.jl")

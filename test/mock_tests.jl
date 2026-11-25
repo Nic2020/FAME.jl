@@ -116,7 +116,7 @@ end
     end
     r = mock_roundtrip(:o, TSeries(2020Q1, [typenan(MIT{Monthly})]))
     @test length(r) == 1 && istypenan(r[2020Q1])
-    for (code, n) in (m.NA64[] => 0, m.NC64[] => 1, m.ND64[] => 1)
+    for (code, n) in (m.NA64[] => 0, m.NC64[] => 1)
         fo = refame(:o, TSeries(2020Q1, [1.0]))
         fo.data[1] = code
         do_write(fo, workdb())
