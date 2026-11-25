@@ -6,12 +6,7 @@ using FAME
 
 using TimeSeriesEcon
 
-if FAME.chli.lib === nothing
-
-    @error "FAME CHLI library not found"
-    exit()
-
-end
+# Tests that need FAME: the CHLI library and a FAME installation.
 
 @testset "workspaces" begin
     w = Workspace(; a=1, b=TSeries(2020Q1, randn(10)),

@@ -1,0 +1,43 @@
+# Copyright (c) 2020-2026, Bank of Canada
+# All rights reserved.
+
+# Tests that do not need FAME, with a stand-in for the CHLI library.
+
+using Test
+using FAME
+using TimeSeriesEcon
+
+FAME.close_chli()
+include("mock_chli.jl")
+FAME.init_chli()
+
+mock_roundtrip(name, value) = begin
+    db = workdb()
+    do_write(refame(name, value), db)
+    unfame(do_read!(quick_info(db, uppercase(string(name))), db))
+end
+
+@testset "mock, basics" begin
+    MockCHLI.reset()
+    @test FAME.version() == v"11.5"
+    w = Workspace(; a=1, b=TSeries(2020Q1, collect(1.0:10)), b32=TSeries(2020M1, Float32.(1:5)),
+        bo=TSeries(2020Q1, [true, false]), s=MVTSeries(2020M1, (:q, :p), reshape(collect(1.0:48), 24, 2)),
+        c=Workspace(; alpha=0.1, n=Workspace(; s="Hello World")), d=2021Q3, e=TSeries(2020Q1),
+        sv=["qmazing", "qmazing", "p", ""], nl="{A,B}", st="p", wk=weekly("2020-03-04", 3))
+    writefame(workdb(), w)
+    r = readfame(workdb(); collect=["c" => ["n"], "s"])
+    @test issetequal(keys(r), keys(w))
+    for n in (:b, :b32, :bo, :e)
+        @test rangeof(r[n]) == rangeof(w[n]) && r[n].values == w[n].values && eltype(r[n]) == eltype(w[n])
+    end
+    for n in (:d, :sv, :nl, :st, :wk)
+        @test r[n] == w[n]
+    end
+    @test r.a === 1.0f0
+    @test r.c.n.s == "Hello World"
+    @test r.s.q.values == w.s.q.values
+    @test allunique(o.name for o in listdb(workdb()))
+end
+
+# leave no library behind for `atexit`
+Core.eval(FAME, :(global chli = Chli{FameDatabase}(nothing)))
