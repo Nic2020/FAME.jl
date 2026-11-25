@@ -45,5 +45,15 @@ end
     @test FAME.FameIndex(p) == 4 * Int64(2)^30
 end
 
+@testset "mock, strings" begin
+    MockCHLI.reset()
+    # lengths are in bytes
+    @test mock_roundtrip(:sa, "été") == "été"
+    @test mock_roundtrip(:sb, "été à") == "été à"
+    @test mock_roundtrip(:sc, ["a", "à", "bébé", ""]) == ["a", "à", "bébé", ""]
+    @test mock_roundtrip(:sd, "") == ""
+    @test mock_roundtrip(:se, repeat("abc", 200)) == repeat("abc", 200)
+end
+
 # leave no library behind for `atexit`
 Core.eval(FAME, :(global chli = Chli{FameDatabase}(nothing)))

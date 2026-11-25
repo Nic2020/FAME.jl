@@ -44,13 +44,14 @@ function unsafe_read!!(::Val{:string}, key, name, range, vals::AbstractVector{St
     @fame_call_check(fame_len_strings,
         (Cint, Cstring, Ptr{FameRange}, Ref{Int32}),
         key, name, range, lens)
-    # allocate string and make room for the trailing '\0'
-    map!(len -> repeat("\0", len + 1), vals, lens)
-    @fame_call_check(fame_get_strings,
+    # allocate buffers with room for the trailing '\0' (lengths are in bytes)
+    bufs = [zeros(UInt8, len + 1) for len in lens]
+    ptrs = Ptr{UInt8}[pointer(buf) for buf in bufs]
+    GC.@preserve bufs @fame_call_check(fame_get_strings,
         (Cint, Cstring, Ptr{FameRange}, Ptr{Ptr{UInt8}}, Ref{Int32}, Ptr{Int32}),
-        key, name, range, vals, lens, C_NULL)
+        key, name, range, ptrs, lens, C_NULL)
     # strip trailing '\0'
-    map!((len, val) -> val[1:len], vals, lens, vals)
+    map!((len, buf) -> String(buf[1:len]), vals, lens, bufs)
     return vals
 end
 
@@ -71,12 +72,12 @@ function unsafe_read!!(::Val{:namelist}, key, name, range, vals)
         (Cint, Cstring, Cint, Ref{Cint}),
         key, name, HNLALL, len)
     # add room for '\0' at the end
-    vals[] = repeat("\0", len[]+1)
+    buf = zeros(UInt8, len[] + 1)
     @cfm_call_check(cfmgtnl,
         (Cint, Cstring, Cint, Ptr{UInt8}, Cint, Ref{Cint}),
-        key, name, HNLALL, vals[], len[], len)
+        key, name, HNLALL, buf, len[], len)
     # remove trailing '\0' from the end
-    vals[] = vals[][1:len[]]
+    vals[] = String(buf[1:len[]])
     return vals
 end
 
