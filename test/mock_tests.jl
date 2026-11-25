@@ -69,6 +69,16 @@ end
     @test names == ["A", long, "Z"]
 end
 
+@testset "mock, names as symbols" begin
+    MockCHLI.reset()
+    for n in (:a, :z)
+        do_write(refame(n, 1.0), workdb())
+    end
+    @test readfame(workdb(), :a).a == 1.0
+    @test readfame(workdb(), "a").a == 1.0
+    @test length(readfame(workdb(), Symbol("?"))) == 2
+end
+
 @testset "mock, commands" begin
     MockCHLI.reset()
     MockCHLI.ERRTEXT[] = repeat("long message ", 40) * "end"

@@ -172,7 +172,7 @@ function readfame(db::FameDatabase, args...; namecase=lowercase, prefix=nothing,
         collect = [collect]
     end
     ret = Workspace()
-    for wc in args
+    for wc in map(String ∘ string, args)
         fos = _iswildcard(wc) ? listdb(db, wc; kwargs...) : [quick_info(db, wc)]
         for fo in fos
             dest, name = _destination(ret, fo.name, glue, namecase, prefix, collect...)
