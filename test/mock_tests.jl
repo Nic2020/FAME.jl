@@ -39,5 +39,11 @@ end
     @test allunique(o.name for o in listdb(workdb()))
 end
 
+@testset "mock, dates" begin
+    # the date is a 64-bit integer
+    p = FAME.Period{:quarterly_december}(Int32(2)^30, 1)
+    @test FAME.FameIndex(p) == 4 * Int64(2)^30
+end
+
 # leave no library behind for `atexit`
 Core.eval(FAME, :(global chli = Chli{FameDatabase}(nothing)))

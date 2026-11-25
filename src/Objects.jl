@@ -38,8 +38,8 @@ function FameIndex(p::Period{FREQ})::FameIndex where {FREQ}
     if iscase(FREQ)
         return p.period
     else
-        date = Ref{Cint}(-1)
-        @fame_call_check(fame_year_period_to_index, (Cint, Ref{Cint}, Cint, Cint),
+        date = Ref{FameIndex}(-1)
+        @fame_call_check(fame_year_period_to_index, (Cint, Ref{FameIndex}, Cint, Cint),
             fame_freq[FREQ], date, p.year, p.period)
         return date[]
     end
