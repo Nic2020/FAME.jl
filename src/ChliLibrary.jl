@@ -54,10 +54,9 @@ function Chli()
         # decorates it with extension and finds it on the PATH
         chli_lib_path = "chli"
         # ensure  chli.dll file is on the PATH so Windows can find it
-        @static if Sys.ARCH == :x86_64
-            Base.ENV["PATH"] *= ";" * Base.ENV["FAME"] * "\\64"
-        else
-            Base.ENV["PATH"] *= ";" * Base.ENV["FAME"]
+        chli_dir = Base.ENV["FAME"] * (Sys.ARCH == :x86_64 ? "\\64" : "")
+        if chli_dir ∉ split(Base.ENV["PATH"], ';')
+            Base.ENV["PATH"] *= ";" * chli_dir
         end
     elseif Sys.islinux()
         # in Linux libchli.so is located in a subdirectory hli
