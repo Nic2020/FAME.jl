@@ -143,5 +143,29 @@ end
     @test (@test_logs mock_roundtrip(:b, TSeries(2020Q1, [true, false]))).values == [true, false]
 end
 
+struct InterruptingValue end
+FAME.refame(::Symbol, ::InterruptingValue) = throw(InterruptException())
+struct InterruptingDict end
+Base.setindex!(::InterruptingDict, _, ::Symbol) = throw(InterruptException())
+
+@testset "mock, skipped objects" begin
+    MockCHLI.reset()
+    db = workdb()
+    # problem objects do not stop the others, one warning at the end
+    @test_logs (:info, r"bad") (:warn, r"1 of 3 objects were not written: bad\.") match_mode = :all writefame(db, Workspace(; a=1.0, bad=1im, z=2.0))
+    @test_logs (:info, r"c_bad") (:warn, r"1 of 2 objects were not written: c_bad\.") match_mode = :all writefame(db, Workspace(; c=Workspace(; bad=1im, ok=1.0)))
+    do_write(refame(:q, TSeries(2020Q1, [1.0])), db)
+    MockCHLI.DB["Q"].fr = 226    # secondly, not in TimeSeriesEcon
+    r = @test_logs (:info, r"Q") (:warn, r"1 of 4 objects were not read: Q\.") match_mode = :all readfame(db)
+    @test issetequal(keys(r), (:a, :c_ok, :z))
+    delete!(MockCHLI.DB, "Q")
+    @test length(@test_logs readfame(db)) == 3
+    # long lists are shortened
+    @test_logs (:warn, r"25 of 30 objects were not read: n1, .*n20, and 5 more\.") FAME._warn_skipped(["n$i" for i = 1:25], 30, "read")
+    # Ctrl-C is not a problem object
+    @test_throws InterruptException writefame(db, Workspace(; a=InterruptingValue()))
+    @test_throws InterruptException FAME._readfame!(InterruptingDict(), :a, quick_info(db, "A"), db)
+end
+
 # leave no library behind for `atexit`
 Core.eval(FAME, :(global chli = Chli{FameDatabase}(nothing)))

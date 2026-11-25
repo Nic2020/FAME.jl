@@ -154,9 +154,20 @@ function _readfame!(ret, ident, fo, db)
     try
         ret[ident] = unfame(do_read!(fo, db))
     catch e
+        e isa InterruptException && rethrow()
         @info "Didn't load $(fo.name): $(sprint(showerror, e))"
+        return false
     end
-    return nothing
+    return true
+end
+
+# One warning at the end for the objects that could not be read or written.
+function _warn_skipped(skipped, total, what, note="")
+    isempty(skipped) && return
+    names = join(first(skipped, 20), ", ")
+    more = length(skipped) > 20 ? ", and $(length(skipped) - 20) more" : ""
+    @warn "$(length(skipped)) of $total objects were not $what: $names$more.$note"
+    return
 end
 
 # If db is given as a string
@@ -172,13 +183,17 @@ function readfame(db::FameDatabase, args...; namecase=lowercase, prefix=nothing,
         collect = [collect]
     end
     ret = Workspace()
+    skipped = String[]
+    total = 0
     for wc in map(String ∘ string, args)
         fos = _iswildcard(wc) ? listdb(db, wc; kwargs...) : [quick_info(db, wc)]
         for fo in fos
             dest, name = _destination(ret, fo.name, glue, namecase, prefix, collect...)
-            _readfame!(dest, Symbol(namecase(name)), fo, db)
+            total += 1
+            _readfame!(dest, Symbol(namecase(name)), fo, db) || push!(skipped, fo.name)
         end
     end
+    _warn_skipped(skipped, total, "read")
     return ret
     ### experimental (write metadata for mvtseries, so we can load them as mvtseries)
     # return _ws_to_mvts(ret)
@@ -524,33 +539,37 @@ function writefame end
 export writefame
 
 # The workhorse - write an iterable of (name, value) pairs
-function _writefame(db, iterable, prefix, glue)
+# `log` collects the number of objects and the names of those not written
+function _writefame(db, iterable, prefix, glue, log)
     for (name, value) in iterable
         if prefix !== nothing
             name = Symbol(prefix, glue, name)
         end
-        _writefame_one(db, value, name, glue)
+        _writefame_one(db, value, name, glue, log)
     end
 end
 
-function _writefame_one(db, value::Workspace, name, glue)
-    _writefame(db, pairs(value), name, glue)
+function _writefame_one(db, value::Workspace, name, glue, log)
+    _writefame(db, pairs(value), name, glue, log)
     return
 end
 
-function _writefame_one(db, value::MVTSeries, name, glue)
-    _writefame(db, pairs(value), name, glue)
+function _writefame_one(db, value::MVTSeries, name, glue, log)
+    _writefame(db, pairs(value), name, glue, log)
     ### experimental (write metadata for mvtseries, so we can load them as mvtseries)
     # nms = join(colnames(value), ",")
     # _writefame(db, [(:mvtseries_colnames => nms),], name, glue)
     return
 end
 
-function _writefame_one(db, value, name, glue)
+function _writefame_one(db, value, name, glue, log)
+    log.total[] += 1
     try
         fo = refame(name, value)
         do_write(fo, db)
     catch e
+        e isa InterruptException && rethrow()
+        push!(log.skipped, string(name))
         @info "Failed to write $(name): $(sprint(showerror, e))" e
     end
     return
@@ -571,9 +590,11 @@ const _FameWritable = Union{MVTSeries,Workspace}
 # write a list of MVTSeries and Workspace
 writefame(db::FameDatabase, data::_FameWritable...; kwargs...) = writefame(db, data; kwargs...)
 @inline function writefame(db::FameDatabase, data::Tuple{_FameWritable,Vararg{_FameWritable}}; prefix=nothing, glue="_")
+    log = (; total=Ref(0), skipped=String[])
     for value in data
-        _writefame_one(db, value, prefix, glue)
+        _writefame_one(db, value, prefix, glue, log)
     end
+    _warn_skipped(log.skipped, log.total[], "written", " If they were in the database, their previous values may be lost.")
 end
 
 """
