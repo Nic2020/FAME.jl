@@ -62,6 +62,9 @@ constructed from the FAME names.
   the name. Use the same value as in [`writefame`](@ref) in order for this to
   work.
 
+An object that cannot be read does not stop the others: it is skipped with a
+message, and one warning at the end lists the skipped objects.
+
 ## Examples
 ```
 julia> w = Workspace(; a = 1, b=TSeries(2020Q1, randn(10)),
@@ -261,6 +264,11 @@ Convert a `FameObject` to a Julia type.
 * DATE SERIES => [`TSeries`](@ref TimeSeriesEcon.TSeries) with element type
   [`MIT`](@ref TimeSeriesEcon.MIT)
 * STRING SERIES => `Vector{String}` (the time series metadata is lost) 
+
+Missing numbers and dates become `NaN` (see `TimeSeriesEcon.typenan`). A missing
+boolean is read as `true`, with a warning. A missing string is read as the text
+FAME returns for it, `"NC"`, `"NA"` or `"ND"`. A series whose only observation is
+NA is read as an empty `TSeries`, because that is how `refame` writes one.
 """
 function unfame end
 export unfame
@@ -516,6 +524,10 @@ Write Julia data to a FAME database.
 * `glue::String` - the `glue` is used to join the prefix to the name. The
   default is `"_"`.
 
+An object that cannot be written does not stop the others: it is skipped with a
+message, and one warning at the end lists the skipped objects. An existing object
+is deleted before the new one is written, so its previous value may be lost.
+
 ### Examples:
 ```
 julia> w = Workspace(; a=1, b=TSeries(2020Q1,ones(10)), s=MVTSeries(2020M1, collect("ab"), randn(24,2)))
@@ -605,7 +617,7 @@ Convert the given value to a [`FameObject`](@ref)
 * `Real` => NUMERIC SCALAR (includes integers)
 * `Float64` => PRECISION SCALAR
 * `Bool` => BOOLEAN SCALAR
-* [`MIT`](@ref TimeSeriesEcon.MIT) => DATE SCALAR
+* [`MIT`](@ref TimeSeriesEcon.MIT) => DATE SCALAR (FAME does not accept an `MIT{Unit}`)
 * `String` => NAMELIST, if it is in the form "{name1,name2,...}", otherwise
   STRING SCALAR
 * `Vector{String}` => CASE SERIES of STRING
