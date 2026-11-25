@@ -214,3 +214,27 @@ end
         rm("test.db", force=true)
     end
 end
+
+@testset "strings, names and missing values" begin
+    FAME.init_chli()
+    db = workdb()
+    rt(name, value) = (do_write(refame(name, value), db); unfame(do_read!(quick_info(db, uppercase(string(name))), db)))
+    @test rt(:sa, "été à") == "été à"
+    @test rt(:sb, ["a", "à", "bébé", ""]) == ["a", "à", "bébé", ""]
+    @test isnan(rt(:na, NaN))
+    @test isnan(rt(:nb, NaN32))
+    @test isempty(rt(:ea, TSeries(2020Q1)))
+    r = rt(:eb, TSeries(2020Q1, [NaN]))
+    @test length(r) == 1 && isnan(r[2020Q1])
+    r = rt(:ec, TSeries(2020Q1, [typenan(MIT{Monthly})]))
+    @test length(r) == 1 && istypenan(r[2020Q1])
+    @test readfame(db, :sa).sa == "été à"
+    fo = refame(:bo, TSeries(2020Q1, [true, false, true]))
+    fo.data[2] = FAME.FBOONC
+    do_write(fo, db)
+    @test_logs (:warn, r"bo: 1 missing boolean"i) readfame(db, "bo")
+    @test_throws FAME.HLIError fame("this is not a fame command"; quiet=true)
+    b = IOBuffer()
+    fame(b, "type 1+1")
+    @test occursin("2", String(take!(b)))
+end
