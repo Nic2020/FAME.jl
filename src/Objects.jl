@@ -134,6 +134,9 @@ end
 
 export listdb
 
+# longest object name (in bytes) that listdb can return
+const MAX_NAME_LENGTH = 1024
+
 """
     item_option(name, values...)
 
@@ -208,24 +211,25 @@ function listdb(db::FameDatabase, wildcard::String = "?";
     ret = FameObject[]
     try
         while true
-            name = repeat(" ", 101)
+            name_buf = zeros(UInt8, MAX_NAME_LENGTH + 1)
             cl = Ref{Cint}()
             ty = Ref{Cint}()
             fr = Ref{Cint}()
             fi = Ref{Clonglong}()
             li = Ref{Clonglong}()
             status = @fame_call(fame_get_next_wildcard,
-                (Cint, Cstring, Ref{Cint}, Ref{Cint}, Ref{Cint}, Ref{Clonglong}, Ref{Clonglong}, Cint, Ref{Cint}),
-                wc_key[], name, cl, ty, fr, fi, li, length(name) - 1, C_NULL)
+                (Cint, Ptr{UInt8}, Ref{Cint}, Ref{Cint}, Ref{Cint}, Ref{Clonglong}, Ref{Clonglong}, Cint, Ref{Cint}),
+                wc_key[], name_buf, cl, ty, fr, fi, li, MAX_NAME_LENGTH, C_NULL)
             if status == HNOOBJ
                 break
             elseif status == HTRUNC
-                println("Object name too long and truncated $name")
+                # a truncated name cannot be looked up
+                @warn "Object name is too long, the object is not listed: $(_c_string(name_buf))..."
+                continue
             else
                 check_status(status)
             end
-            # FAME pads the string with \0 on the right to the length we gave.
-            name = strip(name, '\0')
+            name = _c_string(name_buf)
             # note: fame_get_next_wildcard returns incorrect fi and li for scalars.
             @fame_call_check(fame_quick_info,
                 (Cint, Cstring, Ref{Cint}, Ref{Cint}, Ref{Cint}, Ref{Clonglong}, Ref{Clonglong}),

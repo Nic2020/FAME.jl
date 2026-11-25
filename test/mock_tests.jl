@@ -55,6 +55,20 @@ end
     @test mock_roundtrip(:se, repeat("abc", 200)) == repeat("abc", 200)
 end
 
+@testset "mock, names" begin
+    MockCHLI.reset()
+    @test isdefined(FAME, :HTRUNC)
+    long = "L" * repeat("X", 150)
+    for n in ("A", long, "Z")
+        do_write(refame(Symbol(n), 1.0), workdb())
+    end
+    @test [o.name for o in listdb(workdb())] == ["A", long, "Z"]
+    # too long: not listed, with a warning, and the others are listed
+    do_write(refame(Symbol("M" * repeat("X", 2000)), 1.0), workdb())
+    names = @test_logs (:warn, r"too long") [o.name for o in listdb(workdb())]
+    @test names == ["A", long, "Z"]
+end
+
 @testset "mock, commands" begin
     MockCHLI.reset()
     MockCHLI.ERRTEXT[] = repeat("long message ", 40) * "end"
