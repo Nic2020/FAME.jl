@@ -102,5 +102,29 @@ end
     @test mock_roundtrip(:x, 1.5) == 1.5
 end
 
+@testset "mock, missing observations" begin
+    MockCHLI.reset()
+    m = MockCHLI.MISSING
+    # an empty series is a single NA; a single missing observation is not empty
+    for T in (Float64, Float32, Bool, MIT{Monthly})
+        r = mock_roundtrip(:e, TSeries(T, 2020Q1))
+        @test isempty(r) && eltype(r) == T && firstdate(r) == 2020Q1
+    end
+    for x in (NaN, NaN32)
+        r = mock_roundtrip(:o, TSeries(2020Q1, [x]))
+        @test length(r) == 1 && isnan(r[2020Q1]) && typeof(r[2020Q1]) == typeof(x)
+    end
+    r = mock_roundtrip(:o, TSeries(2020Q1, [typenan(MIT{Monthly})]))
+    @test length(r) == 1 && istypenan(r[2020Q1])
+    for (code, n) in (m.NA64[] => 0, m.NC64[] => 1, m.ND64[] => 1)
+        fo = refame(:o, TSeries(2020Q1, [1.0]))
+        fo.data[1] = code
+        do_write(fo, workdb())
+        @test length(readfame(workdb(), "o").o) == n
+    end
+    r = mock_roundtrip(:o, TSeries(2020Q1, [1.0, NaN, 3.0]))
+    @test isequal(r.values, [1.0, NaN, 3.0])
+end
+
 # leave no library behind for `atexit`
 Core.eval(FAME, :(global chli = Chli{FameDatabase}(nothing)))

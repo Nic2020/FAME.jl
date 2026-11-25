@@ -264,14 +264,14 @@ unfame(fo::FameObject{:series,:numeric,FR}) where {FR} =
 unfame(fo::FameObject{:series,:string,FR}) where {FR} =
     copy(fo.data) # error("Can't handle string series")
 function unfame(fo::FameObject{:series,TY,FR}) where {TY,FR}
-    if length(fo.data) == 1 && _ismissing(fo.data[1], Val(TY))
+    if _isempty_series(fo.data, Val(TY))
         TSeries(MIT{_freq_from_fame(TY)}, _date_to_mit(FR, fo.first_index[]))
     else
         return TSeries(_date_to_mit(FR, fo.first_index[]), [_date_to_mit(TY, d) for d in fo.data])
     end
 end
 function unfame(fo::FameObject{:series,:boolean,FR}) where {FR}
-    if length(fo.data) == 1 && _ismissing(fo.data[1], Val(:boolean))
+    if _isempty_series(fo.data, Val(:boolean))
         return TSeries(Bool, _date_to_mit(FR, fo.first_index[]))
     else
         return TSeries(_date_to_mit(FR, fo.first_index[]), [d != 0 for d in fo.data])
@@ -663,7 +663,7 @@ function refame(name::Symbol, value::TSeries)
             istypenan(v) ? FPRCNC : v
         end
     end
-    # empty TSeries have a single NaN 
+    # an empty TSeries is written as a single NA, see `_isempty_series`
     if isempty(val)
         if ElType == Float32
             push!(val, FNUMNA)
@@ -686,35 +686,41 @@ const HNAVAL = Int32(2) # Missing NA - Not Available
 const HNDVAL = Int32(3) # Missing ND - Not Defined
 const HMGVAL = Int32(4) # Magic value; for internal use only
 
-function _ismissing(x, ::Val{:precision})
+function _missing_type(x, ::Val{:precision})
     mt = Ref{Int32}(-1)
     @cfm_call_check(cfmispm, (Cdouble, Ref{Cint}), Float64(x), mt)
-    return mt[] != HNMVAL
+    return mt[]
 end
 
-function _ismissing(x, ::Val{:numeric})
+function _missing_type(x, ::Val{:numeric})
     mt = Ref{Int32}(-1)
     @cfm_call_check(cfmisnm, (Cfloat, Ref{Cint}), Float32(x), mt)
-    return mt[] != HNMVAL
+    return mt[]
 end
 
-function _ismissing(x, ::Val{:boolean})
+function _missing_type(x, ::Val{:boolean})
     mt = Ref{Int32}(-1)
     @cfm_call_check(cfmisbm, (Cint, Ref{Cint}), Int32(x), mt)
-    return mt[] != HNMVAL
+    return mt[]
 end
 
-function _ismissing(x, ::Val{:string})
+function _missing_type(x, ::Val{:string})
     mt = Ref{Int32}(-1)
     @cfm_call_check(cfmissm, (Cstring, Ref{Cint}), String(strip(x, '\0')), mt)
-    return mt[] != HNMVAL
+    return mt[]
 end
 
-function _ismissing(x, ::Val{FR}) where {FR}
+function _missing_type(x, ::Val{FR}) where {FR}
     mt = Ref{Int32}(-1)
     @fame_call_check(fame_date_missing_type, (Clonglong, Ref{Cint}), Int64(x), mt)
-    return mt[] != HNMVAL
+    return mt[]
 end
+
+_ismissing(x, v::Val) = _missing_type(x, v) != HNMVAL
+
+# `refame` writes an empty TSeries as a single NA observation, so that its first
+# date is not lost. (A missing observation of a TSeries is written as NC.)
+_isempty_series(x::AbstractVector, v::Val) = length(x) == 1 && _missing_type(x[1], v) == HNAVAL
 
 function _unmissing!(x::Ref, v::Val{T}) where {T}
     nan = typenan(eltype(x))
@@ -725,8 +731,7 @@ function _unmissing!(x::Ref, v::Val{T}) where {T}
 end
 
 function _unmissing!(x::Vector, v::Val{T}) where {T}
-    # a single NaN value is an empty TSeries
-    if length(x) == 1 && _ismissing(x[1], v)
+    if _isempty_series(x, v)
         return empty!(x)
     end
     nan = typenan(eltype(x))
