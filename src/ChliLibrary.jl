@@ -163,10 +163,9 @@ end
 
 # the text of the last FAME error
 function cfmferr()
-    len = Ref{Cint}(0)
-    @cfm_call_check(cfmlerr, (Ref{Cint},), len)
-    # cfmferr cuts the text to the length of the string it is given
-    buf = fill(UInt8(' '), len[] + 1)
+    # cfmferr cuts the text to the length of the string it is given. (cfmlerr, which
+    # gives the length, can return 0 for the first error of a session.)
+    buf = fill(UInt8(' '), 4096)
     buf[end] = 0x00
     @cfm_call_check(cfmferr, (Ptr{UInt8},), buf)
     return String(rstrip(_c_string(buf)))
