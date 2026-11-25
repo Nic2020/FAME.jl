@@ -55,5 +55,19 @@ end
     @test mock_roundtrip(:se, repeat("abc", 200)) == repeat("abc", 200)
 end
 
+@testset "mock, commands" begin
+    MockCHLI.reset()
+    MockCHLI.ERRTEXT[] = repeat("long message ", 40) * "end"
+    err = try
+        fame("bad command"; quiet=true)
+    catch e
+        e
+    end
+    @test err isa FAME.HLIError
+    @test err.msg == MockCHLI.ERRTEXT[]
+    # the output is restored after an error
+    @test last(MockCHLI.COMMANDS) == "output terminal"
+end
+
 # leave no library behind for `atexit`
 Core.eval(FAME, :(global chli = Chli{FameDatabase}(nothing)))

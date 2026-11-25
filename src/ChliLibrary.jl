@@ -162,8 +162,16 @@ macro cfm_call_check(symbol, argTypes, args...)
     end |> esc
 end
 
-cfmferr() = (
-    errtxt = repeat(' ', 200);
-    @cfm_call_check(cfmferr, (Cstring,), errtxt);
-    errtxt
-)
+# the text of the last FAME error
+function cfmferr()
+    len = Ref{Cint}(0)
+    @cfm_call_check(cfmlerr, (Ref{Cint},), len)
+    # cfmferr cuts the text to the length of the string it is given
+    buf = fill(UInt8(' '), len[] + 1)
+    buf[end] = 0x00
+    @cfm_call_check(cfmferr, (Ptr{UInt8},), buf)
+    return String(rstrip(_c_string(buf)))
+end
+
+# the string a C function has written in `buf`, up to the terminating '\0'
+_c_string(buf::Vector{UInt8}) = String(buf[1:something(findfirst(iszero, buf), length(buf) + 1)-1])

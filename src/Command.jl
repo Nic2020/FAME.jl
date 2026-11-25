@@ -45,7 +45,13 @@ end
 function _fame(cmd)
     fn = tempname()
     cfmfame("output file(\"$(fn)!\")")
-    cfmfame(deINPUTcmd(cmd))
+    try
+        cfmfame(deINPUTcmd(cmd))
+    catch
+        cfmfame("output terminal")
+        rm(fn; force=true)
+        rethrow()
+    end
     cfmfame("output terminal")
     return fn
 end
