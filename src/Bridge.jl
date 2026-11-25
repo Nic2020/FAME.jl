@@ -591,7 +591,7 @@ export refame
 @inline refame(name::Symbol, value::T) where {T<:Real} = refame(name, convert(promote_type(T, Float32), value))
 
 @inline function refame(name::Symbol, value::Float64)
-    if value == typenan(value)
+    if istypenan(value)
         value = FAME.FPRCNC
     end
     return FameObject{:scalar,:precision,:undefined,Ref{Float64}}(
@@ -599,7 +599,7 @@ export refame
 end
 
 @inline function refame(name::Symbol, value::Float32)
-    if value == typenan(value)
+    if istypenan(value)
         value = FAME.FNUMNC
     end
     return FameObject{:scalar,:numeric,:undefined,Ref{Float32}}(

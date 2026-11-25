@@ -93,5 +93,14 @@ end
     @test last(MockCHLI.COMMANDS) == "output terminal"
 end
 
+@testset "mock, missing scalars" begin
+    MockCHLI.reset()
+    m = MockCHLI.MISSING
+    @test refame(:x, NaN).data[] == m.NC64[]
+    @test refame(:x, NaN32).data[] == m.NC32[]
+    @test isnan(mock_roundtrip(:x, NaN))
+    @test mock_roundtrip(:x, 1.5) == 1.5
+end
+
 # leave no library behind for `atexit`
 Core.eval(FAME, :(global chli = Chli{FameDatabase}(nothing)))
