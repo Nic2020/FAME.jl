@@ -126,5 +126,22 @@ end
     @test isequal(r.values, [1.0, NaN, 3.0])
 end
 
+@testset "mock, missing booleans" begin
+    MockCHLI.reset()
+    m = MockCHLI.MISSING
+    # `Bool` has no missing value: warn
+    fo = refame(:b, TSeries(2020Q1, [true, false, true]))
+    fo.data[2] = m.NCB[]
+    do_write(fo, workdb())
+    r = @test_logs (:warn, r"b: 1 missing boolean"i) readfame(workdb(), "b")
+    @test r.b.values == [true, true, true]
+    fo = refame(:b, TSeries(2020Q1, [true]))
+    fo.data[1] = m.NCB[]
+    do_write(fo, workdb())
+    r = @test_logs (:warn, r"b: 1 missing boolean"i) readfame(workdb(), "b")
+    @test r.b.values == [true]
+    @test (@test_logs mock_roundtrip(:b, TSeries(2020Q1, [true, false]))).values == [true, false]
+end
+
 # leave no library behind for `atexit`
 Core.eval(FAME, :(global chli = Chli{FameDatabase}(nothing)))

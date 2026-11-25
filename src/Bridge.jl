@@ -253,7 +253,10 @@ export unfame
 unfame(fo::FameObject{:scalar,:precision}) = _unmissing!(fo.data, Val(:precision))[]
 unfame(fo::FameObject{:scalar,:numeric}) = _unmissing!(fo.data, Val(:numeric))[]
 unfame(fo::FameObject{:scalar,:string}) = fo.data[]
-unfame(fo::FameObject{:scalar,:boolean}) = fo.data[] != 0
+function unfame(fo::FameObject{:scalar,:boolean})
+    _warn_missing_boolean(fo, _ismissing(fo.data[], Val(:boolean)) ? 1 : 0)
+    return fo.data[] != 0
+end
 unfame(fo::FameObject{:scalar,:namelist}) = fo.data[]
 unfame(fo::FameObject{:scalar,TY}) where {TY} = _date_to_mit(TY, fo.data[])
 
@@ -274,9 +277,12 @@ function unfame(fo::FameObject{:series,:boolean,FR}) where {FR}
     if _isempty_series(fo.data, Val(:boolean))
         return TSeries(Bool, _date_to_mit(FR, fo.first_index[]))
     else
+        _warn_missing_boolean(fo, count(d -> _ismissing(d, Val(:boolean)), fo.data))
         return TSeries(_date_to_mit(FR, fo.first_index[]), [d != 0 for d in fo.data])
     end
 end
+# `Bool` has no missing value
+_warn_missing_boolean(fo, n) = n == 0 || @warn "$(fo.name): $n missing boolean value(s) read as `true`."
     
 
 
