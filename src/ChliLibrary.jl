@@ -11,10 +11,27 @@ using Libdl
 
 export check_status
 
-try
-    include(joinpath(@__DIR__, "..", "deps", "FAMEMessages.jl"))
-catch
-    @error "Try re-building FAME"
+# deps/FAMEMessages.jl is written by deps/build.jl from the FAME help files. Without
+# it (FAME not built yet), use the status codes that FAME.jl itself needs. Tracking
+# the folder makes Julia precompile FAME again once the file exists (a missing file
+# cannot be tracked on Julia 1.12 and later).
+const _messages_file = joinpath(@__DIR__, "..", "deps", "FAMEMessages.jl")
+include_dependency(dirname(_messages_file))
+if isfile(_messages_file)
+    include(_messages_file)
+else
+    @warn "FAME is not built (deps/FAMEMessages.jl is missing): the CHLI error messages are not available. Run `import Pkg; Pkg.build(\"FAME\")`."
+    chli_help_file = "not found"
+    chli_status_description = Dict{Int32,String}(
+        0 => "Success.",
+        13 => "The given object does not exist.",
+        18 => "String truncated.",
+        67 => "Bad option.",
+    )
+    const HSUCC = Int32(0)
+    const HNOOBJ = Int32(13)
+    const HTRUNC = Int32(18)
+    const HBOPT = Int32(67)
 end
 
 """
