@@ -78,10 +78,12 @@ catch e # ============================================
         println(f, "\nchli_status_description = Dict{Int32, String}(")
         println(f, "    0 => ", "\"Success.\",")
         println(f, "    13 => ", "\"The given object does not exist.\",")
+        println(f, "    18 => ", "\"String truncated.\",")
         println(f, "    67 => ", "\"Bad option.\",")
         println(f, ")\n\n")
         println(f, "global const HSUCC = Int32(0)")
         println(f, "global const HNOOBJ = Int32(13)")
+        println(f, "global const HTRUNC = Int32(18)")
         println(f, "global const HBOPT = Int32(67)")
         println(f)
     end

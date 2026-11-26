@@ -11,10 +11,27 @@ using Libdl
 
 export check_status
 
-try
-    include(joinpath(@__DIR__, "..", "deps", "FAMEMessages.jl"))
-catch
-    @error "Try re-building FAME"
+# deps/FAMEMessages.jl is written by deps/build.jl from the FAME help files. Without
+# it (FAME not built yet), use the status codes that FAME.jl itself needs. Tracking
+# the folder makes Julia precompile FAME again once the file exists (a missing file
+# cannot be tracked on Julia 1.12 and later).
+const _messages_file = joinpath(@__DIR__, "..", "deps", "FAMEMessages.jl")
+include_dependency(dirname(_messages_file))
+if isfile(_messages_file)
+    include(_messages_file)
+else
+    @warn "FAME is not built (deps/FAMEMessages.jl is missing): the CHLI error messages are not available. Run `import Pkg; Pkg.build(\"FAME\")`."
+    chli_help_file = "not found"
+    chli_status_description = Dict{Int32,String}(
+        0 => "Success.",
+        13 => "The given object does not exist.",
+        18 => "String truncated.",
+        67 => "Bad option.",
+    )
+    const HSUCC = Int32(0)
+    const HNOOBJ = Int32(13)
+    const HTRUNC = Int32(18)
+    const HBOPT = Int32(67)
 end
 
 """
@@ -54,10 +71,9 @@ function Chli()
         # decorates it with extension and finds it on the PATH
         chli_lib_path = "chli"
         # ensure  chli.dll file is on the PATH so Windows can find it
-        @static if Sys.ARCH == :x86_64
-            Base.ENV["PATH"] *= ";" * Base.ENV["FAME"] * "\\64"
-        else
-            Base.ENV["PATH"] *= ";" * Base.ENV["FAME"]
+        chli_dir = Base.ENV["FAME"] * (Sys.ARCH == :x86_64 ? "\\64" : "")
+        if chli_dir ∉ split(Base.ENV["PATH"], ';')
+            Base.ENV["PATH"] *= ";" * chli_dir
         end
     elseif Sys.islinux()
         # in Linux libchli.so is located in a subdirectory hli
@@ -162,8 +178,15 @@ macro cfm_call_check(symbol, argTypes, args...)
     end |> esc
 end
 
-cfmferr() = (
-    errtxt = repeat(' ', 200);
-    @cfm_call_check(cfmferr, (Cstring,), errtxt);
-    errtxt
-)
+# the text of the last FAME error
+function cfmferr()
+    # cfmferr cuts the text to the length of the string it is given. (cfmlerr, which
+    # gives the length, can return 0 for the first error of a session.)
+    buf = fill(UInt8(' '), 4096)
+    buf[end] = 0x00
+    @cfm_call_check(cfmferr, (Ptr{UInt8},), buf)
+    return String(rstrip(_c_string(buf)))
+end
+
+# the string a C function has written in `buf`, up to the terminating '\0'
+_c_string(buf::Vector{UInt8}) = String(buf[1:something(findfirst(iszero, buf), length(buf) + 1)-1])

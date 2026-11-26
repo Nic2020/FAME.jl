@@ -62,6 +62,9 @@ constructed from the FAME names.
   the name. Use the same value as in [`writefame`](@ref) in order for this to
   work.
 
+An object that cannot be read does not stop the others: it is skipped with a
+message, and one warning at the end lists the skipped objects.
+
 ## Examples
 ```
 julia> w = Workspace(; a = 1, b=TSeries(2020Q1, randn(10)),
@@ -154,9 +157,20 @@ function _readfame!(ret, ident, fo, db)
     try
         ret[ident] = unfame(do_read!(fo, db))
     catch e
+        e isa InterruptException && rethrow()
         @info "Didn't load $(fo.name): $(sprint(showerror, e))"
+        return false
     end
-    return nothing
+    return true
+end
+
+# One warning at the end for the objects that could not be read or written.
+function _warn_skipped(skipped, total, what, note="")
+    isempty(skipped) && return
+    names = join(first(skipped, 20), ", ")
+    more = length(skipped) > 20 ? ", and $(length(skipped) - 20) more" : ""
+    @warn "$(length(skipped)) of $total objects were not $what: $names$more.$note"
+    return
 end
 
 # If db is given as a string
@@ -172,13 +186,17 @@ function readfame(db::FameDatabase, args...; namecase=lowercase, prefix=nothing,
         collect = [collect]
     end
     ret = Workspace()
-    for wc in args
+    skipped = String[]
+    total = 0
+    for wc in map(String ∘ string, args)
         fos = _iswildcard(wc) ? listdb(db, wc; kwargs...) : [quick_info(db, wc)]
         for fo in fos
             dest, name = _destination(ret, fo.name, glue, namecase, prefix, collect...)
-            _readfame!(dest, Symbol(namecase(name)), fo, db)
+            total += 1
+            _readfame!(dest, Symbol(namecase(name)), fo, db) || push!(skipped, fo.name)
         end
     end
+    _warn_skipped(skipped, total, "read")
     return ret
     ### experimental (write metadata for mvtseries, so we can load them as mvtseries)
     # return _ws_to_mvts(ret)
@@ -246,6 +264,11 @@ Convert a `FameObject` to a Julia type.
 * DATE SERIES => [`TSeries`](@ref TimeSeriesEcon.TSeries) with element type
   [`MIT`](@ref TimeSeriesEcon.MIT)
 * STRING SERIES => `Vector{String}` (the time series metadata is lost) 
+
+Missing numbers and dates become `NaN` (see `TimeSeriesEcon.typenan`). A missing
+boolean is read as `true`, with a warning. A missing string is read as the text
+FAME returns for it, `"NC"`, `"NA"` or `"ND"`. A series whose only observation is
+NA is read as an empty `TSeries`, because that is how `refame` writes one.
 """
 function unfame end
 export unfame
@@ -253,7 +276,10 @@ export unfame
 unfame(fo::FameObject{:scalar,:precision}) = _unmissing!(fo.data, Val(:precision))[]
 unfame(fo::FameObject{:scalar,:numeric}) = _unmissing!(fo.data, Val(:numeric))[]
 unfame(fo::FameObject{:scalar,:string}) = fo.data[]
-unfame(fo::FameObject{:scalar,:boolean}) = fo.data[] != 0
+function unfame(fo::FameObject{:scalar,:boolean})
+    _warn_missing_boolean(fo, _ismissing(fo.data[], Val(:boolean)) ? 1 : 0)
+    return fo.data[] != 0
+end
 unfame(fo::FameObject{:scalar,:namelist}) = fo.data[]
 unfame(fo::FameObject{:scalar,TY}) where {TY} = _date_to_mit(TY, fo.data[])
 
@@ -264,19 +290,22 @@ unfame(fo::FameObject{:series,:numeric,FR}) where {FR} =
 unfame(fo::FameObject{:series,:string,FR}) where {FR} =
     copy(fo.data) # error("Can't handle string series")
 function unfame(fo::FameObject{:series,TY,FR}) where {TY,FR}
-    if length(fo.data) == 1 && _ismissing(fo.data[1], Val(TY))
+    if _isempty_series(fo.data, Val(TY))
         TSeries(MIT{_freq_from_fame(TY)}, _date_to_mit(FR, fo.first_index[]))
     else
         return TSeries(_date_to_mit(FR, fo.first_index[]), [_date_to_mit(TY, d) for d in fo.data])
     end
 end
 function unfame(fo::FameObject{:series,:boolean,FR}) where {FR}
-    if length(fo.data) == 1 && _ismissing(fo.data[1], Val(:boolean))
+    if _isempty_series(fo.data, Val(:boolean))
         return TSeries(Bool, _date_to_mit(FR, fo.first_index[]))
     else
+        _warn_missing_boolean(fo, count(d -> _ismissing(d, Val(:boolean)), fo.data))
         return TSeries(_date_to_mit(FR, fo.first_index[]), [d != 0 for d in fo.data])
     end
 end
+# `Bool` has no missing value
+_warn_missing_boolean(fo, n) = n == 0 || @warn "$(fo.name): $n missing boolean value(s) read as `true`."
     
 
 
@@ -495,6 +524,10 @@ Write Julia data to a FAME database.
 * `glue::String` - the `glue` is used to join the prefix to the name. The
   default is `"_"`.
 
+An object that cannot be written does not stop the others: it is skipped with a
+message, and one warning at the end lists the skipped objects. An existing object
+is deleted before the new one is written, so its previous value may be lost.
+
 ### Examples:
 ```
 julia> w = Workspace(; a=1, b=TSeries(2020Q1,ones(10)), s=MVTSeries(2020M1, collect("ab"), randn(24,2)))
@@ -518,33 +551,37 @@ function writefame end
 export writefame
 
 # The workhorse - write an iterable of (name, value) pairs
-function _writefame(db, iterable, prefix, glue)
+# `log` collects the number of objects and the names of those not written
+function _writefame(db, iterable, prefix, glue, log)
     for (name, value) in iterable
         if prefix !== nothing
             name = Symbol(prefix, glue, name)
         end
-        _writefame_one(db, value, name, glue)
+        _writefame_one(db, value, name, glue, log)
     end
 end
 
-function _writefame_one(db, value::Workspace, name, glue)
-    _writefame(db, pairs(value), name, glue)
+function _writefame_one(db, value::Workspace, name, glue, log)
+    _writefame(db, pairs(value), name, glue, log)
     return
 end
 
-function _writefame_one(db, value::MVTSeries, name, glue)
-    _writefame(db, pairs(value), name, glue)
+function _writefame_one(db, value::MVTSeries, name, glue, log)
+    _writefame(db, pairs(value), name, glue, log)
     ### experimental (write metadata for mvtseries, so we can load them as mvtseries)
     # nms = join(colnames(value), ",")
     # _writefame(db, [(:mvtseries_colnames => nms),], name, glue)
     return
 end
 
-function _writefame_one(db, value, name, glue)
+function _writefame_one(db, value, name, glue, log)
+    log.total[] += 1
     try
         fo = refame(name, value)
         do_write(fo, db)
     catch e
+        e isa InterruptException && rethrow()
+        push!(log.skipped, string(name))
         @info "Failed to write $(name): $(sprint(showerror, e))" e
     end
     return
@@ -565,9 +602,11 @@ const _FameWritable = Union{MVTSeries,Workspace}
 # write a list of MVTSeries and Workspace
 writefame(db::FameDatabase, data::_FameWritable...; kwargs...) = writefame(db, data; kwargs...)
 @inline function writefame(db::FameDatabase, data::Tuple{_FameWritable,Vararg{_FameWritable}}; prefix=nothing, glue="_")
+    log = (; total=Ref(0), skipped=String[])
     for value in data
-        _writefame_one(db, value, prefix, glue)
+        _writefame_one(db, value, prefix, glue, log)
     end
+    _warn_skipped(log.skipped, log.total[], "written", " If they were in the database, their previous values may be lost.")
 end
 
 """
@@ -578,7 +617,7 @@ Convert the given value to a [`FameObject`](@ref)
 * `Real` => NUMERIC SCALAR (includes integers)
 * `Float64` => PRECISION SCALAR
 * `Bool` => BOOLEAN SCALAR
-* [`MIT`](@ref TimeSeriesEcon.MIT) => DATE SCALAR
+* [`MIT`](@ref TimeSeriesEcon.MIT) => DATE SCALAR (FAME does not accept an `MIT{Unit}`)
 * `String` => NAMELIST, if it is in the form "{name1,name2,...}", otherwise
   STRING SCALAR
 * `Vector{String}` => CASE SERIES of STRING
@@ -591,7 +630,7 @@ export refame
 @inline refame(name::Symbol, value::T) where {T<:Real} = refame(name, convert(promote_type(T, Float32), value))
 
 @inline function refame(name::Symbol, value::Float64)
-    if value == typenan(value)
+    if istypenan(value)
         value = FAME.FPRCNC
     end
     return FameObject{:scalar,:precision,:undefined,Ref{Float64}}(
@@ -599,7 +638,7 @@ export refame
 end
 
 @inline function refame(name::Symbol, value::Float32)
-    if value == typenan(value)
+    if istypenan(value)
         value = FAME.FNUMNC
     end
     return FameObject{:scalar,:numeric,:undefined,Ref{Float32}}(
@@ -663,7 +702,7 @@ function refame(name::Symbol, value::TSeries)
             istypenan(v) ? FPRCNC : v
         end
     end
-    # empty TSeries have a single NaN 
+    # an empty TSeries is written as a single NA, see `_isempty_series`
     if isempty(val)
         if ElType == Float32
             push!(val, FNUMNA)
@@ -686,35 +725,41 @@ const HNAVAL = Int32(2) # Missing NA - Not Available
 const HNDVAL = Int32(3) # Missing ND - Not Defined
 const HMGVAL = Int32(4) # Magic value; for internal use only
 
-function _ismissing(x, ::Val{:precision})
+function _missing_type(x, ::Val{:precision})
     mt = Ref{Int32}(-1)
     @cfm_call_check(cfmispm, (Cdouble, Ref{Cint}), Float64(x), mt)
-    return mt[] != HNMVAL
+    return mt[]
 end
 
-function _ismissing(x, ::Val{:numeric})
+function _missing_type(x, ::Val{:numeric})
     mt = Ref{Int32}(-1)
     @cfm_call_check(cfmisnm, (Cfloat, Ref{Cint}), Float32(x), mt)
-    return mt[] != HNMVAL
+    return mt[]
 end
 
-function _ismissing(x, ::Val{:boolean})
+function _missing_type(x, ::Val{:boolean})
     mt = Ref{Int32}(-1)
     @cfm_call_check(cfmisbm, (Cint, Ref{Cint}), Int32(x), mt)
-    return mt[] != HNMVAL
+    return mt[]
 end
 
-function _ismissing(x, ::Val{:string})
+function _missing_type(x, ::Val{:string})
     mt = Ref{Int32}(-1)
     @cfm_call_check(cfmissm, (Cstring, Ref{Cint}), String(strip(x, '\0')), mt)
-    return mt[] != HNMVAL
+    return mt[]
 end
 
-function _ismissing(x, ::Val{FR}) where {FR}
+function _missing_type(x, ::Val{FR}) where {FR}
     mt = Ref{Int32}(-1)
     @fame_call_check(fame_date_missing_type, (Clonglong, Ref{Cint}), Int64(x), mt)
-    return mt[] != HNMVAL
+    return mt[]
 end
+
+_ismissing(x, v::Val) = _missing_type(x, v) != HNMVAL
+
+# `refame` writes an empty TSeries as a single NA observation, so that its first
+# date is not lost. (A missing observation of a TSeries is written as NC.)
+_isempty_series(x::AbstractVector, v::Val) = length(x) == 1 && _missing_type(x[1], v) == HNAVAL
 
 function _unmissing!(x::Ref, v::Val{T}) where {T}
     nan = typenan(eltype(x))
@@ -725,8 +770,7 @@ function _unmissing!(x::Ref, v::Val{T}) where {T}
 end
 
 function _unmissing!(x::Vector, v::Val{T}) where {T}
-    # a single NaN value is an empty TSeries
-    if length(x) == 1 && _ismissing(x[1], v)
+    if _isempty_series(x, v)
         return empty!(x)
     end
     nan = typenan(eltype(x))
